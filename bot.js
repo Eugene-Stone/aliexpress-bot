@@ -1,15 +1,32 @@
+const { TOKEN_const, CHANNEL_const, USER_1, USER_2 } = require("./constants");
+
 const TelegramBot = require("node-telegram-bot-api");
 const axios = require("axios");
 const cheerio = require("cheerio");
 const translate = require("translate-google");
+const fs = require("fs");
 
-const TOKEN = "BOT_TOKEN";
-const CHANNEL = "@yourchannel";
+// const TOKEN = "BOT_TOKEN";
+// const CHANNEL = "@yourchannel";
+const TOKEN = TOKEN_const;
+const CHANNEL = CHANNEL_const;
+
+const allowedUsers = [
+	USER_1, // твой ID
+	USER_2, // например второй админ
+];
 
 const bot = new TelegramBot(TOKEN, { polling: true });
-let queue = [];
 
-let products = [];
+
+let queue = [];
+if (fs.existsSync("queue.json")) {
+	queue = JSON.parse(fs.readFileSync("queue.json"));
+}
+
+function saveQueue() {
+	fs.writeFileSync("queue.json", JSON.stringify(queue, null, 2));
+}
 
 async function translateTitle(text) {
 	try {
@@ -33,9 +50,12 @@ async function parseProduct(url) {
 
 	const $ = cheerio.load(data);
 
-	const title = $('meta[property="og:title"]').attr("content") || $("title").text();
+	const title =
+		$('meta[property="og:title"]').attr("content") || $("title").text();
 	const image = $('meta[property="og:image"]').attr("content");
-	const price = $('meta[property="product:price:amount"]').attr("content") || $('[class*="price"]').first().text();
+	const price =
+		$('meta[property="product:price:amount"]').attr("content") ||
+		$('[class*="price"]').first().text();
 
 	return {
 		title,
@@ -44,7 +64,6 @@ async function parseProduct(url) {
 		price,
 	};
 }
-
 
 const hooks = [
 	"🔥 Ты захочешь себе:",
@@ -123,31 +142,36 @@ const subscribeTexts = [
 	"Полезные вещи 👉 @AliCoolForYou",
 ];
 
-
-
 bot.on("message", async (msg) => {
-	// const url = msg.text;
-	const urls = msg.text.split("\n").filter(l => l.includes("aliexpress"));
+	if (!allowedUsers.includes(msg.from.id)) {
+		return;
+	}
+
+	const urls = msg.text.split("\n").filter((l) => l.includes("aliexpress"));
 	for (const url of urls) {
 		queue.push(url);
+		saveQueue();
 	}
 
 	bot.sendMessage(msg.chat.id, `Добавлено ссылок: ${urls.length}`);
 
 	async function processQueue() {
-
 		if (queue.length === 0) return;
 
 		const url = queue.shift();
+		saveQueue();
 
 		try {
-
 			const product = await parseProduct(url);
 			product.title = shortenTitle(await translateTitle(product.title));
 
 			const hook = hooks[Math.floor(Math.random() * hooks.length)];
-			const linkText = linkTexts[Math.floor(Math.random() * linkTexts.length)];
-			const subscribe = subscribeTexts[Math.floor(Math.random() * subscribeTexts.length)];
+			const linkText =
+				linkTexts[Math.floor(Math.random() * linkTexts.length)];
+			const subscribe =
+				subscribeTexts[
+					Math.floor(Math.random() * subscribeTexts.length)
+				];
 
 			await bot.sendPhoto(CHANNEL, product.image, {
 				caption: `${hook} \n\n${product.title}\n${product.url}\n\n${subscribe}`,
@@ -155,16 +179,16 @@ bot.on("message", async (msg) => {
 					inline_keyboard: [[{ text: linkText, url: product.url }]],
 				},
 			});
-
 		} catch (e) {
 			console.log("Ошибка постинга", e.message);
 		}
-
 	}
-	
+
 	// 5000 = 5 сек
 	// 60000 = 1 минута
 	// 300000 = 5 минут
 	// 900000 = 15 минут
-	setInterval(processQueue, 5000);
+	// 1800000 = 30 минут
+	// 3600000 = 60 минут
+	setInterval(processQueue, 3600000);
 });
